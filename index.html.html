@@ -68,6 +68,11 @@
             const [file, setFile] = useState(null);
             const [csvData, setCsvData] = useState([]);
             const [routes, setRoutes] = useState({});
+            
+            // Estado para o Mapeamento de MLPs (Transportadoras)
+            const [mlpMapping, setMlpMapping] = useState({});
+            const mlpInputRef = useRef(null);
+
             const [isDragging, setIsDragging] = useState(false);
             const [processing, setProcessing] = useState(false);
             const [error, setError] = useState('');
@@ -75,8 +80,6 @@
 
             // Nomes de colunas possíveis agrupados por prioridade
             const possibleRouteCols = ['rota', 'route', 'roteiro', 'codigo da rota'];
-            
-            // Separamos as colunas para dar prioridade ao EAL1/ECE1 em vez de cair logo no SAL1
             const possibleDestFacCols = ['destination_facility', 'destination facility'];
             const possibleOpTypeCols = ['tipo_de_operacao', 'tipo de operacao'];
             const possibleFacIdCols = ['facility_id', 'facilityid', 'facility id'];
@@ -100,7 +103,6 @@
                 const headers = Object.keys(data[0]);
                 const routeCol = findColumn(headers, possibleRouteCols);
                 
-                // Procuramos cada coluna separadamente
                 const destFacCol = findColumn(headers, possibleDestFacCols);
                 const opTypeCol = findColumn(headers, possibleOpTypeCols);
                 const facIdCol = findColumn(headers, possibleFacIdCols);
@@ -114,7 +116,6 @@
 
                 const groupedRoutes = {};
                 
-                // Função para limpar traços ou vazios nas variáveis
                 const cleanStr = (val) => val && val !== '-' && val !== 'NULL' ? val : '';
 
                 data.forEach(row => {
@@ -125,10 +126,6 @@
                     let facId = facIdCol ? cleanStr(row[facIdCol]?.trim().toUpperCase()) : '';
                     let ciclo = cicloCol ? cleanStr(row[cicloCol]?.trim().toUpperCase()) : '';
 
-                    // Prioridade rigorosa para a separação:
-                    // 1º destination_facility (EAL1, ECE1, etc)
-                    // 2º Tipo de Operação (SVC, XPT, etc - caso não tenha destFac)
-                    // 3º Facility ID (SAL1 - caso seja o modelo antigo onde não há os de cima)
                     let facility = destFac || opType || facId || 'OUTROS';
 
                     // Separação específica para SVC por Ciclo (CHP, PM1, AM1, etc)
@@ -144,6 +141,7 @@
                     if (!groupedRoutes[finalRouteName]) {
                         groupedRoutes[finalRouteName] = {
                             facility: facility,
+                            baseRouteName: baseRouteName, // Guardar o nome original da rota para cruzar com o ficheiro de MLP
                             data: []
                         };
                     }
@@ -175,6 +173,53 @@
                     },
                     error: function(err) {
                         setError('Erro ao ler o CSV: ' + err.message);
+                        setProcessing(false);
+                    }
+                });
+            };
+
+            const handleMlpUpload = (uploadedFile) => {
+                if (!uploadedFile) return;
+                
+                setProcessing(true);
+                Papa.parse(uploadedFile, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        const data = results.data;
+                        if (data.length === 0) {
+                            setError('O ficheiro de distribuição de MLP está vazio.');
+                            setProcessing(false);
+                            return;
+                        }
+
+                        const headers = Object.keys(data[0]);
+                        const possibleMlpCols = ['mlb', 'transportadora', 'mlp'];
+                        const possibleRouteMlpCols = ['roteiro', 'rota', 'route'];
+
+                        const mlpCol = findColumn(headers, possibleMlpCols);
+                        const routeCol = findColumn(headers, possibleRouteMlpCols);
+
+                        if (!mlpCol || !routeCol) {
+                            setError('Não foram encontradas as colunas "MLB" (ou similar) e "Roteiro" no ficheiro de distribuição.');
+                            setProcessing(false);
+                            return;
+                        }
+
+                        const mapping = {};
+                        data.forEach(row => {
+                            const mlp = row[mlpCol]?.trim();
+                            const rota = row[routeCol]?.trim().toUpperCase();
+                            if (mlp && rota && mlp !== '#N/A' && mlp !== '') {
+                                mapping[rota] = mlp;
+                            }
+                        });
+
+                        setMlpMapping(mapping);
+                        setProcessing(false);
+                    },
+                    error: function(err) {
+                        setError('Erro ao ler CSV de distribuição: ' + err.message);
                         setProcessing(false);
                     }
                 });
@@ -220,7 +265,6 @@
                 let colStyles = {};
 
                 if (isModeloAntigo) {
-                    // LAYOUT ANTIGO (Com Rua, Número, Referências)
                     tableColumns = [
                         "Rota", "Ordem", "Shipment", "Cidade", "Bairro", 
                         "Rua", "Numero", "CEP", "Referências"
@@ -244,18 +288,11 @@
                     });
 
                     colStyles = {
-                        0: { cellWidth: 15 }, 
-                        1: { cellWidth: 12, halign: 'center', fontStyle: 'bold' }, 
-                        2: { cellWidth: 23 }, 
-                        3: { cellWidth: 25 }, 
-                        4: { cellWidth: 30 }, 
-                        5: { cellWidth: 40 }, 
-                        6: { cellWidth: 15 }, 
-                        7: { cellWidth: 16 }, 
-                        8: { cellWidth: 'auto' } 
+                        0: { cellWidth: 15 }, 1: { cellWidth: 12, halign: 'center', fontStyle: 'bold' }, 2: { cellWidth: 23 }, 
+                        3: { cellWidth: 25 }, 4: { cellWidth: 30 }, 5: { cellWidth: 40 }, 6: { cellWidth: 15 }, 
+                        7: { cellWidth: 16 }, 8: { cellWidth: 'auto' } 
                     };
                 } else {
-                    // NOVO LAYOUT - Atualizado com os tópicos solicitados
                     tableColumns = [
                         "Op.", "Rota", "Ordem", "Shipment", "Estado", "Cidade", 
                         "Bairro", "CEP", "T. End.", "T. Cli.", "Ação", "Ciclo", "Dest. Fac.", "Pacote"
@@ -270,43 +307,25 @@
 
                         let tipoPacoteRaw = row['tipo_pacote'] || '-';
                         let tipoPacote = tipoPacoteRaw === 'general_merchant' ? 'Normal' : tipoPacoteRaw;
-                        if (tipoPacote.toLowerCase() === 'bulky') {
-                            tipoPacote = 'Bulky'; 
-                        }
+                        if (tipoPacote.toLowerCase() === 'bulky') tipoPacote = 'Bulky'; 
 
                         return [
                             row['Tipo_de_operacao'] || row['tipo_de_operacao'] || row['tipo de operacao'] || '-',
                             row['Rota'] || row['rota'] || routeName,
-                            seq, 
-                            row['Shipment'] || row['shipment'] || '-', 
-                            row['Estado'] || row['estado'] || '-', 
-                            row['Cidade'] || row['cidade'] || '-', 
-                            row['Bairro'] || row['bairro'] || '-', 
-                            row['CEP'] || row['cep'] || '-', 
-                            tipoEnd,
-                            row['tipo_cliente'] || row['tipo cliente'] || '-', 
-                            row['tipo_de_acao'] || row['tipo de acao'] || '-',
-                            row['Ciclo'] || row['ciclo'] || '-',
+                            seq, row['Shipment'] || row['shipment'] || '-', row['Estado'] || row['estado'] || '-', 
+                            row['Cidade'] || row['cidade'] || '-', row['Bairro'] || row['bairro'] || '-', 
+                            row['CEP'] || row['cep'] || '-', tipoEnd, row['tipo_cliente'] || row['tipo cliente'] || '-', 
+                            row['tipo_de_acao'] || row['tipo de acao'] || '-', row['Ciclo'] || row['ciclo'] || '-',
                             row['destination_facility'] || row['destination facility'] || row['facility_id'] || '-',
                             tipoPacote
                         ];
                     });
 
                     colStyles = {
-                        0: { cellWidth: 12 }, // Op.
-                        1: { cellWidth: 15 }, // Rota
-                        2: { cellWidth: 12, halign: 'center', fontStyle: 'bold' }, // Ordem
-                        3: { cellWidth: 23 }, // Shipment
-                        4: { cellWidth: 16 }, // Estado
-                        5: { cellWidth: 22 }, // Cidade
-                        6: { cellWidth: 25 }, // Bairro
-                        7: { cellWidth: 16 }, // CEP
-                        8: { cellWidth: 12, halign: 'center' }, // T. End.
-                        9: { cellWidth: 12, halign: 'center' }, // T. Cli.
-                        10: { cellWidth: 16 }, // Ação
-                        11: { cellWidth: 12 }, // Ciclo
-                        12: { cellWidth: 16 }, // Dest. Fac.
-                        13: { cellWidth: 'auto' } // Pacote
+                        0: { cellWidth: 12 }, 1: { cellWidth: 15 }, 2: { cellWidth: 12, halign: 'center', fontStyle: 'bold' }, 
+                        3: { cellWidth: 23 }, 4: { cellWidth: 16 }, 5: { cellWidth: 22 }, 6: { cellWidth: 25 }, 
+                        7: { cellWidth: 16 }, 8: { cellWidth: 12, halign: 'center' }, 9: { cellWidth: 12, halign: 'center' }, 
+                        10: { cellWidth: 16 }, 11: { cellWidth: 12 }, 12: { cellWidth: 16 }, 13: { cellWidth: 'auto' }
                     };
                 }
 
@@ -345,7 +364,11 @@
                     
                     let isFirst = true;
                     Object.entries(routes).forEach(([routeName, routeInfo]) => {
-                        if (routeInfo.facility === modalName) {
+                        const hasMlpMap = Object.keys(mlpMapping).length > 0;
+                        const normalizedBaseRoute = routeInfo.baseRouteName.toUpperCase();
+                        const currentCategory = hasMlpMap ? (mlpMapping[normalizedBaseRoute] || 'Sem_MLP_Definido') : routeInfo.facility;
+
+                        if (currentCategory === modalName) {
                             addRouteToDoc(doc, routeName, routeInfo.data, !isFirst);
                             isFirst = false;
                         }
@@ -363,10 +386,19 @@
                 setProcessing(true);
                 try {
                     const zip = new JSZip();
+                    const hasMlpMap = Object.keys(mlpMapping).length > 0;
                     
                     Object.entries(routes).forEach(([routeName, routeInfo]) => {
                         const pdfBlob = generatePDF(routeName, routeInfo.data, true);
-                        const folderName = routeInfo.facility || 'Outros';
+                        
+                        let folderName = routeInfo.facility || 'Outros';
+                        
+                        // Se houver mapeamento de transportadora, usa o MLP como nome da pasta
+                        if (hasMlpMap) {
+                            const normalizedBaseRoute = routeInfo.baseRouteName.toUpperCase();
+                            folderName = mlpMapping[normalizedBaseRoute] || 'Sem_MLP_Definido';
+                        }
+
                         zip.folder(folderName).file(`Rota_${routeName}.pdf`, pdfBlob);
                     });
                     
@@ -381,7 +413,12 @@
 
             const exportToExcel = () => {
                 let allData = [];
+                const hasMlpMap = Object.keys(mlpMapping).length > 0;
+
                 Object.entries(routes).forEach(([routeName, routeInfo]) => {
+                    const normalizedBaseRoute = routeInfo.baseRouteName.toUpperCase();
+                    const mlpName = hasMlpMap ? (mlpMapping[normalizedBaseRoute] || '-') : '-';
+
                     routeInfo.data.forEach((row, index) => {
                         let seqRaw = row['Ordem'] || row['ordem'] || (index + 1).toString();
                         let seq = /^\d+$/.test(seqRaw) ? `${seqRaw}A` : seqRaw;
@@ -391,13 +428,11 @@
 
                         let tipoPacoteRaw = row['tipo_pacote'] || '-';
                         let tipoPacote = tipoPacoteRaw === 'general_merchant' ? 'Normal' : tipoPacoteRaw;
-                        if (tipoPacote.toLowerCase() === 'bulky') {
-                            tipoPacote = 'Bulky'; 
-                        }
+                        if (tipoPacote.toLowerCase() === 'bulky') tipoPacote = 'Bulky'; 
 
-                        // Junta todas as colunas possíveis na planilha de Excel para não perder nada
                         allData.push({
-                            "Pasta_Destino": routeInfo.facility,
+                            "Pasta_Destino": hasMlpMap ? mlpName : routeInfo.facility,
+                            "Transportadora_MLP": mlpName,
                             "Rota_PDF": routeName,
                             "Rota": row['Rota'] || row['rota'] || routeName,
                             "Ordem": seq,
@@ -425,7 +460,12 @@
                 XLSX.writeFile(workbook, "Planeamento_Rotas.xlsx");
             };
 
-            const uniqueModals = [...new Set(Object.values(routes).map(r => r.facility))].filter(Boolean).sort();
+            const uniqueModals = [...new Set(Object.values(routes).map(r => {
+                if (Object.keys(mlpMapping).length > 0) {
+                    return mlpMapping[r.baseRouteName.toUpperCase()] || 'Sem_MLP_Definido';
+                }
+                return r.facility;
+            }))].filter(Boolean).sort();
 
             return (
                 <div className="min-h-screen p-6 flex flex-col items-center">
@@ -464,12 +504,12 @@
                                 ) : (
                                     <>
                                         <Icon name="file-spreadsheet" className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                                        <h3 className="text-xl font-medium text-gray-700 mb-2">Arraste o seu CSV aqui</h3>
+                                        <h3 className="text-xl font-medium text-gray-700 mb-2">Arraste o seu CSV de Rotas aqui</h3>
                                         <p className="text-md text-gray-500 mb-6">ou clique para procurar no computador</p>
 
                                         <div className="text-xs text-left text-gray-500 bg-gray-100 p-4 rounded-md inline-block">
                                             <p className="font-semibold mb-1 text-gray-700">💡 Inteligência Automática</p>
-                                            <p>O sistema deteta sozinho o seu CSV e adapta o PDF (usa <b>Rua/Número</b> ou <b>Estado/Veículo</b> consoante o ficheiro).</p>
+                                            <p>O sistema deteta sozinho o seu CSV e adapta o PDF.</p>
                                         </div>
                                     </>
                                 )}
@@ -495,7 +535,7 @@
                                         </div>
                                         <div className="flex flex-wrap gap-2">
                                             <button 
-                                                onClick={() => { setRoutes({}); setFile(null); setCsvData([]); }}
+                                                onClick={() => { setRoutes({}); setFile(null); setCsvData([]); setMlpMapping({}); }}
                                                 className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
                                                 disabled={processing}
                                             >
@@ -523,11 +563,42 @@
                                         </div>
                                     </div>
 
+                                    {/* Módulo de Upload para Distribuição MLP */}
+                                    <div className={`p-4 rounded-lg border flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-colors ${Object.keys(mlpMapping).length > 0 ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'}`}>
+                                        <div>
+                                            <h3 className={`text-sm font-bold flex items-center ${Object.keys(mlpMapping).length > 0 ? 'text-green-800' : 'text-blue-800'}`}>
+                                                <Icon name="truck" className="w-4 h-4 mr-2" />
+                                                Organizar por Transportadora (MLP)
+                                            </h3>
+                                            <p className={`text-xs mt-1 ${Object.keys(mlpMapping).length > 0 ? 'text-green-700' : 'text-blue-600'}`}>
+                                                {Object.keys(mlpMapping).length > 0 
+                                                    ? 'Ficheiro de distribuição carregado com sucesso! Os PDFs serão organizados pelas pastas das transportadoras correspondentes.' 
+                                                    : 'Opcional: Carregue o ficheiro "DISTRIBUIÇÃO PM" (que contém MLB e Roteiro) para agrupar as pastas do ZIP pelo nome da transportadora.'}
+                                            </p>
+                                        </div>
+                                        <div className="flex-shrink-0">
+                                            <input 
+                                                type="file" 
+                                                accept=".csv" 
+                                                className="hidden" 
+                                                ref={mlpInputRef}
+                                                onChange={(e) => handleMlpUpload(e.target.files[0])}
+                                            />
+                                            <button 
+                                                onClick={() => !processing && mlpInputRef.current.click()}
+                                                className={`px-4 py-2 text-white rounded-md text-sm font-medium transition shadow-sm ${Object.keys(mlpMapping).length > 0 ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+                                                disabled={processing}
+                                            >
+                                                {Object.keys(mlpMapping).length > 0 ? 'Atualizar Distribuição' : 'Carregar Distribuição MLP'}
+                                            </button>
+                                        </div>
+                                    </div>
+
                                     {uniqueModals.length > 0 && (
-                                        <div className="flex items-center flex-wrap gap-3 bg-indigo-50 p-3 rounded-lg border border-indigo-200">
+                                        <div className="flex items-center flex-wrap gap-3 bg-indigo-50 p-3 rounded-lg border border-indigo-200 mt-2">
                                             <span className="text-sm font-semibold text-indigo-800 flex items-center">
                                                 <Icon name="file-text" className="w-4 h-4 mr-1" />
-                                                Baixar PDFs Unificados (Por Modal):
+                                                Baixar PDFs Unificados (Por {Object.keys(mlpMapping).length > 0 ? 'Transportadora' : 'Modal'}):
                                             </span>
                                             <div className="flex flex-wrap gap-2">
                                                 {uniqueModals.map(modal => (
@@ -548,30 +619,38 @@
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {Object.entries(routes).map(([routeName, routeInfo]) => (
-                                        <div key={routeName} className="border border-gray-200 rounded-lg p-4 flex justify-between items-center hover:shadow-sm transition bg-gray-50">
-                                            <div className="flex items-start space-x-3 overflow-hidden">
-                                                <div className="bg-white p-2 rounded-lg border border-gray-200 shadow-sm mt-1">
-                                                    <Icon name="folder" className="w-5 h-5 text-yellow-500" />
+                                    {Object.entries(routes).map(([routeName, routeInfo]) => {
+                                        const folderDisplay = Object.keys(mlpMapping).length > 0 
+                                            ? (mlpMapping[routeInfo.baseRouteName.toUpperCase()] || 'Sem_MLP_Definido') 
+                                            : routeInfo.facility;
+
+                                        return (
+                                            <div key={routeName} className="border border-gray-200 rounded-lg p-4 flex justify-between items-center hover:shadow-sm transition bg-gray-50">
+                                                <div className="flex items-start space-x-3 overflow-hidden">
+                                                    <div className={`p-2 rounded-lg border shadow-sm mt-1 bg-white ${Object.keys(mlpMapping).length > 0 ? 'border-green-200' : 'border-gray-200'}`}>
+                                                        <Icon name={Object.keys(mlpMapping).length > 0 ? 'truck' : 'folder'} className={`w-5 h-5 ${Object.keys(mlpMapping).length > 0 ? 'text-green-600' : 'text-yellow-500'}`} />
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <h3 className="font-semibold text-gray-800 text-md truncate" title={routeName}>{routeName}</h3>
+                                                        <p className="text-xs text-gray-500 mb-1">
+                                                            Pasta ZIP: <span className={`font-medium ${Object.keys(mlpMapping).length > 0 ? 'text-green-700' : 'text-gray-700'}`}>{folderDisplay}</span>
+                                                        </p>
+                                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                                            {routeInfo.data.length} pacotes
+                                                        </span>
+                                                    </div>
                                                 </div>
-                                                <div className="min-w-0">
-                                                    <h3 className="font-semibold text-gray-800 text-md truncate" title={routeName}>{routeName}</h3>
-                                                    <p className="text-xs text-gray-500 mb-1">Pasta ZIP: <span className="font-medium text-gray-700">{routeInfo.facility}</span></p>
-                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                        {routeInfo.data.length} pacotes
-                                                    </span>
-                                                </div>
+                                                <button 
+                                                    onClick={() => generatePDF(routeName, routeInfo.data)}
+                                                    className="p-2 ml-2 text-blue-600 hover:bg-blue-100 rounded-md transition flex-shrink-0 bg-white border border-transparent hover:border-blue-200"
+                                                    title="Transferir apenas este PDF"
+                                                    disabled={processing}
+                                                >
+                                                    <Icon name="file-down" className="w-5 h-5" />
+                                                </button>
                                             </div>
-                                            <button 
-                                                onClick={() => generatePDF(routeName, routeInfo.data)}
-                                                className="p-2 ml-2 text-blue-600 hover:bg-blue-100 rounded-md transition flex-shrink-0 bg-white border border-transparent hover:border-blue-200"
-                                                title="Transferir apenas este PDF"
-                                                disabled={processing}
-                                            >
-                                                <Icon name="file-down" className="w-5 h-5" />
-                                            </button>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             </div>
                         )}
