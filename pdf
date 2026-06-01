@@ -21,22 +21,28 @@
     <!-- jsPDF e jsPDF-AutoTable para gerar PDF -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-
+    
     <!-- SheetJS para gerar Excel/Planilha -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-
+    
     <!-- JSZip e FileSaver para exportar tudo em ZIP -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
-
+    
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
-        .drag-active { border-color: #3b82f6; background-color: #eff6ff; }
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #f3f4f6; 
+        }
+        .drag-active { 
+            border-color: #3b82f6; 
+            background-color: #eff6ff; 
+        }
     </style>
 </head>
 <body>
     <div id="root"></div>
-
+    
     <script type="text/babel">
         const { useState, useRef } = React;
 
@@ -74,6 +80,7 @@
             const possibleDestFacCols = ['destination_facility', 'destination facility'];
             const possibleOpTypeCols = ['tipo_de_operacao', 'tipo de operacao'];
             const possibleFacIdCols = ['facility_id', 'facilityid', 'facility id'];
+            const possibleCicloCols = ['ciclo', 'cycle'];
 
             const findColumn = (headers, possibleNames) => {
                 const normalizedHeaders = headers.map(h => h.toLowerCase().replace(/_/g, ' ').trim());
@@ -97,6 +104,7 @@
                 const destFacCol = findColumn(headers, possibleDestFacCols);
                 const opTypeCol = findColumn(headers, possibleOpTypeCols);
                 const facIdCol = findColumn(headers, possibleFacIdCols);
+                const cicloCol = findColumn(headers, possibleCicloCols);
 
                 if (!routeCol) {
                     setError('Não foi possível identificar a coluna de "Rota". Certifique-se de ter uma coluna com nome "Rota", "Roteiro" etc no seu CSV.');
@@ -115,12 +123,18 @@
                     let destFac = destFacCol ? cleanStr(row[destFacCol]?.trim().toUpperCase()) : '';
                     let opType = opTypeCol ? cleanStr(row[opTypeCol]?.trim().toUpperCase()) : '';
                     let facId = facIdCol ? cleanStr(row[facIdCol]?.trim().toUpperCase()) : '';
+                    let ciclo = cicloCol ? cleanStr(row[cicloCol]?.trim().toUpperCase()) : '';
 
                     // Prioridade rigorosa para a separação:
                     // 1º destination_facility (EAL1, ECE1, etc)
                     // 2º Tipo de Operação (SVC, XPT, etc - caso não tenha destFac)
                     // 3º Facility ID (SAL1 - caso seja o modelo antigo onde não há os de cima)
                     let facility = destFac || opType || facId || 'OUTROS';
+
+                    // Separação específica para SVC por Ciclo (CHP, PM1, AM1, etc)
+                    if (facility === 'SVC' && ciclo) {
+                        facility = `SVC_${ciclo}`;
+                    }
 
                     let finalRouteName = baseRouteName;
                     if (facility && !finalRouteName.toUpperCase().endsWith(`_${facility}`)) {
