@@ -293,10 +293,10 @@
                         7: { cellWidth: 16 }, 8: { cellWidth: 'auto' } 
                     };
                 } else {
-                    // NOVO MODELO: facility_id, Rota, Shipment, Estado, Cidade, Bairro, CEP, PARADAS, tipo_de_endereco, tipo_cliente, Ciclo, tipo_pacote
+                    // NOVO MODELO: facility_id, Rota, Ordem, Shipment, Estado, Cidade, Bairro, CEP, tipo_de_endereco, tipo_cliente, tipo_de_acao, Ciclo, tipo_pacote
                     tableColumns = [
-                        "Ordem", "Fac. ID", "Rota", "Shipment", "Estado", "Cidade", 
-                        "Bairro", "CEP", "Paradas", "T. End.", "T. Cli.", "Ciclo", "Pacote"
+                        "Fac. ID", "Rota", "Ordem", "Shipment", "Estado", "Cidade", 
+                        "Bairro", "CEP", "T. End.", "T. Cli.", "Ação", "Ciclo", "Pacote"
                     ];
 
                     tableRows = routeData.map((row, index) => {
@@ -308,37 +308,38 @@
 
                         let tipoPacoteRaw = row['tipo_pacote'] || '-';
                         let tipoPacote = tipoPacoteRaw === 'general_merchant' ? 'Normal' : tipoPacoteRaw;
-                        if (tipoPacote.toLowerCase() === 'bulky') tipoPacote = 'Bulky'; 
+                        // Tratamento para Bulky e Voluminous
+                        if (tipoPacote.toLowerCase() === 'bulky' || tipoPacote.toLowerCase() === 'voluminous') tipoPacote = 'Bulky'; 
 
                         return [
-                            seq,
                             row['facility_id'] || row['facility id'] || '-',
                             row['Rota'] || row['rota'] || routeName,
+                            seq,
                             row['Shipment'] || row['shipment'] || '-', 
                             row['Estado'] || row['estado'] || '-', 
                             row['Cidade'] || row['cidade'] || '-', 
                             row['Bairro'] || row['bairro'] || '-', 
                             row['CEP'] || row['cep'] || '-', 
-                            row['PARADAS'] || row['paradas'] || '-',
                             tipoEnd, 
                             row['tipo_cliente'] || row['tipo cliente'] || '-', 
+                            row['tipo_de_acao'] || row['tipo de acao'] || '-',
                             row['Ciclo'] || row['ciclo'] || '-',
                             tipoPacote
                         ];
                     });
 
                     colStyles = {
-                        0: { cellWidth: 12, halign: 'center', fontStyle: 'bold' }, 
-                        1: { cellWidth: 14 }, 
-                        2: { cellWidth: 16 }, 
+                        0: { cellWidth: 14 }, 
+                        1: { cellWidth: 16 }, 
+                        2: { cellWidth: 12, halign: 'center', fontStyle: 'bold' }, 
                         3: { cellWidth: 23 }, 
                         4: { cellWidth: 16 }, 
                         5: { cellWidth: 22 }, 
                         6: { cellWidth: 26 }, 
                         7: { cellWidth: 16 }, 
-                        8: { cellWidth: 14, halign: 'center' }, 
-                        9: { cellWidth: 12, halign: 'center' }, 
-                        10: { cellWidth: 14 }, 
+                        8: { cellWidth: 12, halign: 'center' }, 
+                        9: { cellWidth: 14 }, 
+                        10: { cellWidth: 16 }, 
                         11: { cellWidth: 12 }, 
                         12: { cellWidth: 'auto' }
                     };
@@ -449,8 +450,8 @@
                             "Pasta_Destino": hasMlpMap ? mlpName : routeInfo.facility,
                             "Transportadora_MLP": mlpName,
                             "Rota_PDF": routeName,
-                            "Rota": row['Rota'] || row['rota'] || routeName,
                             "Fac. ID": row['facility_id'] || row['facility id'] || '-',
+                            "Rota": row['Rota'] || row['rota'] || routeName,
                             "Ordem": seq,
                             "Shipment": row['Shipment'] || row['shipment'] || '-',
                             "Estado": row['Estado'] || row['estado'] || '-',
@@ -459,13 +460,12 @@
                             "Rua": row['Rua'] || row['rua'] || '-',
                             "Numero": row['Numero'] || row['numero'] || row['Número'] || '-',
                             "CEP": row['CEP'] || row['cep'] || '-',
-                            "Paradas": row['PARADAS'] || row['paradas'] || '-',
                             "Veículo": row['Veiculo'] || row['veiculo'] || row['Veículo'] || '-',
                             "SPR": row['SPR'] || row['spr'] || '-',
                             "T. End.": tipoEnd,
                             "T. Cli.": row['tipo_cliente'] || row['tipo cliente'] || '-',
-                            "Ciclo": row['Ciclo'] || row['ciclo'] || '-',
                             "Ação": row['tipo_de_acao'] || row['tipo de acao'] || '-',
+                            "Ciclo": row['Ciclo'] || row['ciclo'] || '-',
                             "Pacote": tipoPacote,
                             "Referências": row['Referências'] || row['Referencia'] || row['Referencias'] || '-'
                         });
